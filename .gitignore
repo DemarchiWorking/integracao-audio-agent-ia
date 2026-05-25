@@ -12,3 +12,6 @@ orchestrator/test_audio_s10fe.wav
 # Python
 *.pyc
 *.pyo
+
+# Credenciais locais
+.env
