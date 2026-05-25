@@ -11,6 +11,7 @@ $ROOT        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ORCH        = Join-Path $ROOT 'orchestrator'
 $PID_API     = Join-Path $ORCH '.pid_api'
 $PID_WATCHER = Join-Path $ORCH '.pid_watcher'
+$PID_INBOX   = Join-Path $ORCH '.pid_inbox'
 $LOG_API     = Join-Path $ORCH 'api_err.log'
 $LOG_WATCHER = Join-Path $ORCH 'watcher_err.log'
 $API_URL     = 'http://localhost:8765'
@@ -108,13 +109,14 @@ Write-Host ''
 Write-Host '  [2/3] Parando servicos...' -ForegroundColor White
 Write-SEP
 
-# Parar watcher primeiro, depois API
-Stop-OrchestratorService -pidFile $PID_WATCHER -label 'Watcher    '
-Stop-OrchestratorService -pidFile $PID_API     -label 'API FastAPI'
+# Parar na ordem inversa
+Stop-OrchestratorService -pidFile $PID_INBOX   -label 'Inbox Watcher'
+Stop-OrchestratorService -pidFile $PID_WATCHER -label 'KDE Watcher  '
+Stop-OrchestratorService -pidFile $PID_API     -label 'API FastAPI  '
 
 # Verificar processos orfaos (main.py ou watcher.py ainda rodando)
 $orphans = Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq 'python.exe' -and ($_.CommandLine -match 'main\.py|watcher\.py') }
+    Where-Object { $_.Name -eq 'python.exe' -and ($_.CommandLine -match 'main\.py|watcher\.py|inbox_watcher\.py') }
 
 if ($orphans) {
     foreach ($o in $orphans) {

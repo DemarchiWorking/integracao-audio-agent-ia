@@ -10,8 +10,10 @@ $ROOT        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ORCH        = Join-Path $ROOT 'orchestrator'
 $PID_API     = Join-Path $ORCH '.pid_api'
 $PID_WATCHER = Join-Path $ORCH '.pid_watcher'
+$PID_INBOX   = Join-Path $ORCH '.pid_inbox'
 $LOG_API     = Join-Path $ORCH 'api_err.log'
 $LOG_WATCHER = Join-Path $ORCH 'watcher_err.log'
+$LOG_INBOX   = Join-Path $ORCH 'inbox_err.log'
 $KDE_DIR     = Join-Path $env:USERPROFILE 'Documents\KDE Connect'
 $KDE_DAEMON  = Join-Path $env:LOCALAPPDATA 'Programs\KDE Connect\bin\kdeconnectd.exe'
 $KDE_IND     = Join-Path $env:LOCALAPPDATA 'Programs\KDE Connect\bin\kdeconnect-indicator.exe'
@@ -111,7 +113,7 @@ if ($env:ANTHROPIC_API_KEY -and $env:ANTHROPIC_API_KEY.Length -gt 10) {
 }
 
 # Arquivos do orquestrador
-$requiredFiles = @('main.py','watcher.py','processar_com_claude.py','config.py','packet_generator.py')
+$requiredFiles = @('main.py','watcher.py','inbox_watcher.py','processar_com_claude.py','config.py','packet_generator.py')
 foreach ($f in $requiredFiles) {
     $fPath = Join-Path $ORCH $f
     if (Test-Path $fPath) {
@@ -224,110 +226,111 @@ if (Is-ProcRunning $PID_API) {
 Write-Host ''
 
 # ============================================================
-# [4/5] WATCHER
+# [4/6] WATCHER KDE CONNECT
 # ============================================================
-Write-Host '  [4/5] Iniciando Watcher monitor KDE Connect...' -ForegroundColor White
+Write-Host '  [4/6] Iniciando Watcher KDE Connect...' -ForegroundColor White
 Write-SEP
 
 if (Is-ProcRunning $PID_WATCHER) {
     $existingPid = Get-Content $PID_WATCHER
-    Write-OK "Watcher: ja rodando PID $existingPid -- mantendo"
+    Write-OK "KDE Watcher: ja rodando PID $existingPid -- mantendo"
 } else {
     Remove-Item $PID_WATCHER -ErrorAction SilentlyContinue
-    $watLog    = Join-Path $ORCH 'watcher.log'
-    $watLogErr = $LOG_WATCHER
-
+    # KDE Connect salva em Downloads nesta maquina (config padrao Windows)
+    # Setar env var antes do Start-Process para ser herdada pelo processo filho
+    $env:KDE_CONNECT_DIR = Join-Path $env:USERPROFILE 'Downloads'
     $proc = Start-Process python -ArgumentList 'watcher.py' `
         -WorkingDirectory $ORCH -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $watLog `
-        -RedirectStandardError  $watLogErr
-
+        -RedirectStandardOutput (Join-Path $ORCH 'watcher.log') `
+        -RedirectStandardError  $LOG_WATCHER
     $proc.Id | Out-File $PID_WATCHER -Encoding ascii
     Start-Sleep -Seconds 2
+    Write-OK "KDE Watcher: ativo PID $($proc.Id)  monitorando Downloads"
+}
+Write-Host ''
 
-    $logLines = Get-Content $watLogErr -Tail 4 -ErrorAction SilentlyContinue
-    $isReady  = $logLines | Where-Object { $_ -match 'Aguardando|pronto|watcher' }
-    if ($isReady) {
-        Write-OK "Watcher: ativo e monitorando PID $($proc.Id)"
+# ============================================================
+# [5/6] INBOX WATCHER (auto-executor Claude)
+# ============================================================
+Write-Host '  [5/6] Iniciando Inbox Watcher (auto-executor Claude)...' -ForegroundColor White
+Write-SEP
+
+if (Is-ProcRunning $PID_INBOX) {
+    $existingPid = Get-Content $PID_INBOX
+    Write-OK "Inbox Watcher: ja rodando PID $existingPid -- mantendo"
+} else {
+    Remove-Item $PID_INBOX -ErrorAction SilentlyContinue
+    $proc = Start-Process python -ArgumentList 'inbox_watcher.py' `
+        -WorkingDirectory $ORCH -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $ORCH 'inbox.log') `
+        -RedirectStandardError  $LOG_INBOX
+    $proc.Id | Out-File $PID_INBOX -Encoding ascii
+    Start-Sleep -Seconds 2
+    if ($env:ANTHROPIC_API_KEY) {
+        Write-OK "Inbox Watcher: PID $($proc.Id)  modo AUTO-EXECUTE ativado"
     } else {
-        Write-OK "Watcher: iniciado PID $($proc.Id)"
+        Write-WARN "Inbox Watcher: PID $($proc.Id)  modo MANUAL (sem ANTHROPIC_API_KEY)"
+        Write-WARN '  Configure a key para ativar execucao automatica pelo Claude'
     }
 }
 Write-Host ''
 
 # ============================================================
-# [5/5] VALIDACAO FINAL
+# [6/6] VALIDACAO FINAL
 # ============================================================
-Write-Host '  [5/5] Validacao final do sistema...' -ForegroundColor White
+Write-Host '  [6/6] Validacao final...' -ForegroundColor White
 Write-SEP
 
-# Health check
 try {
-    $healthUrl  = $API_URL + '/health'
-    $healthResp = (Invoke-WebRequest $healthUrl -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
-    Write-OK "Health: status=$($healthResp.status)  versao=$($healthResp.version)"
-} catch {
-    Write-ERR 'Health check falhou -- API nao responde'
-}
+    $healthResp = (Invoke-WebRequest ($API_URL + '/health') -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
+    Write-OK "API Health: $($healthResp.status) v$($healthResp.version)"
+} catch { Write-ERR 'Health check falhou' }
 
-# Status
 try {
-    $statusUrl  = $API_URL + '/status'
-    $statusResp = (Invoke-WebRequest $statusUrl -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
-    $stats = $statusResp.stats
-    Write-OK "Backend STT: $($statusResp.backend_stt)"
-    Write-OK "Stats: recebidos=$($stats.received)  processados=$($stats.processed)  erros=$($stats.errors)"
-} catch {
-    Write-WARN 'Status endpoint nao respondeu'
-}
+    $st = (Invoke-WebRequest ($API_URL + '/status') -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
+    Write-OK "STT backend: $($st.backend_stt)  processados=$($st.stats.processed)"
+} catch { Write-WARN 'Status nao respondeu' }
 
-# Inbox
 $inbox = Join-Path $ROOT 'inbox_tarefas'
 if (Test-Path $inbox) {
-    $packets = (Get-ChildItem $inbox -Directory -ErrorAction SilentlyContinue).Count
-    Write-OK "Pacotes em inbox_tarefas: $packets"
-    if ($packets -gt 0) {
-        $lastPkt = (Get-ChildItem $inbox -Directory |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1).Name
-        Write-OK "Ultimo pacote: $lastPkt"
-    }
+    $pkts = (Get-ChildItem $inbox -Directory -ErrorAction SilentlyContinue).Count
+    $pend = (Get-ChildItem $inbox -Directory -ErrorAction SilentlyContinue |
+        Where-Object { -not (Test-Path (Join-Path $_.FullName 'execucao.md')) }).Count
+    Write-OK "Pacotes: $pkts total  $pend pendentes de processamento Claude"
 }
 
 $finalApiPid     = Get-Content $PID_API     -ErrorAction SilentlyContinue
 $finalWatcherPid = Get-Content $PID_WATCHER -ErrorAction SilentlyContinue
+$finalInboxPid   = Get-Content $PID_INBOX   -ErrorAction SilentlyContinue
 $finalKdePid     = (Get-Process -Name 'kdeconnectd' -ErrorAction SilentlyContinue).Id
 
-# ---- Resumo final -----------------------------------------------------------
+# ---- Resumo -----------------------------------------------------------------
 Write-Host ''
 Write-Host '  ============================================================' -ForegroundColor Green
-Write-Host '   SISTEMA PRONTO                                             ' -ForegroundColor Green
+Write-Host '   SISTEMA PRONTO v2.0 -- PIPELINE COMPLETO                  ' -ForegroundColor Green
 Write-Host '  ============================================================' -ForegroundColor Green
 Write-Host ''
-Write-Host '   SERVICOS ATIVOS:' -ForegroundColor White
-Write-Host "     API FastAPI   http://localhost:8765   PID $finalApiPid" -ForegroundColor Green
-Write-Host "     Watcher       monitorando KDE Connect  PID $finalWatcherPid" -ForegroundColor Green
-Write-Host "     KDE Connect   bridge WiFi S10 FE       PID $finalKdePid" -ForegroundColor Green
+Write-Host '   SERVICOS:' -ForegroundColor White
+Write-Host "     API FastAPI      porta 8765          PID $finalApiPid" -ForegroundColor Green
+Write-Host "     KDE Watcher      monitora Downloads   PID $finalWatcherPid" -ForegroundColor Green
+if ($env:ANTHROPIC_API_KEY) {
+    Write-Host "     Inbox Watcher    AUTO-EXECUTE Claude  PID $finalInboxPid" -ForegroundColor Green
+} else {
+    Write-Host "     Inbox Watcher    modo MANUAL           PID $finalInboxPid" -ForegroundColor Yellow
+}
+Write-Host "     KDE Connect      bridge S10 FE        PID $finalKdePid" -ForegroundColor Green
 Write-Host ''
-Write-Host '   IP DO PC para informar ao S10 FE: 192.168.3.65' -ForegroundColor Yellow
-Write-Host "   PASTA MONITORADA: $KDE_DIR" -ForegroundColor Yellow
+Write-Host '   FLUXO AUTOMATICO (quando ANTHROPIC_API_KEY configurada):' -ForegroundColor Cyan
+Write-Host '     S10 envia audio -> Whisper transcreve -> Claude classifica' -ForegroundColor White
+Write-Host '     -> prioriza P1/P2/P3 -> executa no Windows -> salva resultado' -ForegroundColor White
 Write-Host ''
-Write-Host '   PROXIMOS PASSOS NO S10 FE:' -ForegroundColor Cyan
-Write-Host '     1. Abra o app KDE Connect' -ForegroundColor White
-Write-Host '     2. Toque em DESKTOP-N3BPMC5' -ForegroundColor White
-Write-Host '     3. Grave audio no Gravador de Voz Samsung' -ForegroundColor White
-Write-Host '     4. KDE Connect -> Enviar arquivos -> selecione a gravacao' -ForegroundColor White
+Write-Host '   S10 FE: grave audio -> KDE Connect -> Enviar arquivos' -ForegroundColor Yellow
 Write-Host ''
-Write-Host '   MONITORAR EM TEMPO REAL:' -ForegroundColor Cyan
+Write-Host '   LOGS:' -ForegroundColor Cyan
+Write-Host "     Get-Content '$LOG_INBOX'   -Wait -Tail 5" -ForegroundColor DarkGray
 Write-Host "     Get-Content '$LOG_WATCHER' -Wait -Tail 5" -ForegroundColor DarkGray
-Write-Host "     Get-Content '$LOG_API'     -Wait -Tail 5" -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '   PROCESSAR COM CLAUDE apos receber audio:' -ForegroundColor Cyan
-$processorPath = Join-Path $ORCH 'processar_com_claude.py'
-Write-Host "     python '$processorPath'" -ForegroundColor DarkGray
-Write-Host ''
-Write-Host '   PARAR TUDO:' -ForegroundColor Cyan
-Write-Host '     .\stop-integracao.ps1' -ForegroundColor DarkGray
+Write-Host '   PARAR: .\stop-integracao.ps1' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  ============================================================' -ForegroundColor Green
 Write-Host ''
