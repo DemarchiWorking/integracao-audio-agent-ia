@@ -1,14 +1,18 @@
 """
-inbox_watcher.py — Auto-executor de pacotes
-DataDev Demarchi Lab v2.0
+inbox_watcher.py — Auto-executor de pacotes v2.1
+DataDev Demarchi Lab
 
 Monitora inbox_tarefas/ em busca de novos pacotes.
-Quando detecta transcricao.md nova, dispara processar_com_claude.py automaticamente.
+Quando detecta transcricao.md nova, dispara o processador automaticamente.
 
-Requer ANTHROPIC_API_KEY configurada. Sem a key, loga aviso e aguarda.
+Motor de processamento (auto-deteccao, sem configuracao manual):
+  1. ANTHROPIC_API_KEY disponivel  -> processar_com_claude.py      (API direta)
+  2. Claude Code CLI autenticado   -> processar_com_claude_code.py (plano Pro)
+  3. Nenhum disponivel             -> modo MANUAL (so gera pacote)
 """
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -24,14 +28,60 @@ logging.basicConfig(
 )
 log = logging.getLogger("inbox_watcher")
 
-INBOX_DIR   = Path(__file__).parent.parent / "inbox_tarefas"
-PROCESSOR   = Path(__file__).parent / "processar_com_claude.py"
-SETTLE_SECS = 3   # aguarda arquivo terminar de ser escrito
+INBOX_DIR        = Path(__file__).parent.parent / "inbox_tarefas"
+PROCESSOR_API    = Path(__file__).parent / "processar_com_claude.py"
+PROCESSOR_CODE   = Path(__file__).parent / "processar_com_claude_code.py"
+SETTLE_SECS      = 3   # aguarda arquivo terminar de ser escrito
 
+
+# ---------------------------------------------------------------------------
+# Deteccao de motor disponivel
+# ---------------------------------------------------------------------------
+
+def detect_mode() -> tuple:
+    """
+    Detecta qual motor de processamento esta disponivel.
+    Retorna (modo, processor_path, descricao).
+    Modos: 'api' | 'claude_code' | 'manual'
+    """
+    # Modo 1: API key configurada
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if api_key and len(api_key) > 20 and PROCESSOR_API.exists():
+        return ("api", PROCESSOR_API, "API Anthropic (ANTHROPIC_API_KEY)")
+
+    # Modo 2: Claude Code CLI disponivel e autenticado
+    claude_cmd = shutil.which("claude") or shutil.which("claude.cmd")
+    if not claude_cmd:
+        # Tentar caminhos comuns no Windows
+        npm_path = Path(os.environ.get("APPDATA", "")) / "npm" / "claude.cmd"
+        if npm_path.exists():
+            claude_cmd = str(npm_path)
+
+    if claude_cmd and PROCESSOR_CODE.exists():
+        try:
+            r = subprocess.run(
+                [claude_cmd, "--version"],
+                capture_output=True, text=True, timeout=8
+            )
+            if r.returncode == 0:
+                return ("claude_code", PROCESSOR_CODE, f"Claude Code CLI Pro ({claude_cmd})")
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    # Modo 3: Manual
+    return ("manual", None, "MANUAL (nenhum motor disponivel)")
+
+
+# ---------------------------------------------------------------------------
+# Handler do watchdog
+# ---------------------------------------------------------------------------
 
 class InboxHandler(FileSystemEventHandler):
 
-    def __init__(self):
+    def __init__(self, mode: str, processor: Path | None, mode_desc: str):
+        self._mode      = mode
+        self._processor = processor
+        self._mode_desc = mode_desc
         self._seen: set = set()
 
     def on_created(self, event):
@@ -48,42 +98,53 @@ class InboxHandler(FileSystemEventHandler):
                 self._dispatch(packet_dir)
 
     def _dispatch(self, packet_dir: Path):
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            log.warning("ANTHROPIC_API_KEY nao configurada — pacote aguardando processamento manual")
-            log.warning(f"  Execute: python processar_com_claude.py {packet_dir}")
+        if self._mode == "manual":
+            log.warning("Nenhum motor configurado — pacote aguardando processamento manual")
+            log.warning(f"  Claude Code: python processar_com_claude_code.py {packet_dir}")
+            log.warning(f"  API:         python processar_com_claude.py {packet_dir}")
             return
 
-        log.info(f"Disparando Claude para: {packet_dir.name}")
+        log.info(f"Motor: {self._mode_desc}")
+        log.info(f"Disparando processador para: {packet_dir.name}")
+
         try:
             result = subprocess.run(
-                [sys.executable, str(PROCESSOR), str(packet_dir)],
-                timeout=120,
+                [sys.executable, str(self._processor), str(packet_dir)],
+                timeout=180,
                 encoding="utf-8",
-                capture_output=False,   # deixa stdout/stderr ir para o log do processo
+                capture_output=False,
             )
             if result.returncode == 0:
                 log.info(f"Pacote processado com sucesso: {packet_dir.name}")
             else:
-                log.error(f"Claude retornou exit={result.returncode} para {packet_dir.name}")
+                log.error(f"Processador retornou exit={result.returncode} para {packet_dir.name}")
         except subprocess.TimeoutExpired:
-            log.error(f"Timeout 120s ao processar {packet_dir.name}")
+            log.error(f"Timeout 180s ao processar {packet_dir.name}")
         except Exception as e:
-            log.error(f"Erro ao disparar Claude: {e}")
+            log.error(f"Erro ao disparar processador: {e}")
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if api_key:
-        log.info("ANTHROPIC_API_KEY: configurada — modo AUTO-EXECUTE ativado")
+    mode, processor, mode_desc = detect_mode()
+
+    if mode == "api":
+        log.info(f"Motor selecionado: {mode_desc}")
+    elif mode == "claude_code":
+        log.info(f"Motor selecionado: {mode_desc}")
     else:
-        log.warning("ANTHROPIC_API_KEY: NAO configurada — modo MANUAL (so gera pacote, nao processa)")
+        log.warning("Nenhum motor detectado — rodando em modo MANUAL")
+        log.warning("  Para ativar modo API:          configure ANTHROPIC_API_KEY no .env")
+        log.warning("  Para ativar modo Claude Code:  instale em https://claude.ai/download")
 
     log.info(f"Monitorando: {INBOX_DIR}")
 
-    handler  = InboxHandler()
+    handler  = InboxHandler(mode, processor, mode_desc)
     observer = Observer()
     observer.schedule(handler, str(INBOX_DIR), recursive=True)
     observer.start()

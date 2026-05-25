@@ -103,17 +103,32 @@ foreach ($pkg in $pkgList) {
     }
 }
 
-# API Key
+# Motor de processamento (API key ou Claude Code CLI)
+$processingMode = 'MANUAL'
 if ($env:ANTHROPIC_API_KEY -and $env:ANTHROPIC_API_KEY.Length -gt 10) {
     $masked = $env:ANTHROPIC_API_KEY.Substring(0, 14) + '...'
-    Write-OK "ANTHROPIC_API_KEY: $masked"
+    Write-OK "Motor: API Anthropic  key=$masked"
+    $processingMode = 'API'
 } else {
-    Write-WARN 'ANTHROPIC_API_KEY: NAO configurada'
-    Write-WARN '  Execute: [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY","sk-ant-...","User")'
+    # Verificar Claude Code CLI
+    $claudeExe = Get-Command claude -ErrorAction SilentlyContinue
+    if (-not $claudeExe) {
+        $npmClaude = Join-Path $env:APPDATA 'npm\claude.cmd'
+        if (Test-Path $npmClaude) { $claudeExe = $npmClaude }
+    }
+    if ($claudeExe) {
+        $claudeVer = (& $claudeExe --version 2>&1) | Select-Object -First 1
+        Write-OK "Motor: Claude Code CLI (plano Pro)  $claudeVer"
+        $processingMode = 'CLAUDE_CODE'
+    } else {
+        Write-WARN 'Motor: NENHUM — sem API key e sem claude CLI'
+        Write-WARN '  Opcao 1: configure ANTHROPIC_API_KEY no arquivo .env'
+        Write-WARN '  Opcao 2: instale Claude Code em https://claude.ai/download'
+    }
 }
 
 # Arquivos do orquestrador
-$requiredFiles = @('main.py','watcher.py','inbox_watcher.py','processar_com_claude.py','config.py','packet_generator.py')
+$requiredFiles = @('main.py','watcher.py','inbox_watcher.py','processar_com_claude.py','processar_com_claude_code.py','config.py','packet_generator.py')
 foreach ($f in $requiredFiles) {
     $fPath = Join-Path $ORCH $f
     if (Test-Path $fPath) {
@@ -313,14 +328,22 @@ Write-Host ''
 Write-Host '   SERVICOS:' -ForegroundColor White
 Write-Host "     API FastAPI      porta 8765          PID $finalApiPid" -ForegroundColor Green
 Write-Host "     KDE Watcher      monitora Downloads   PID $finalWatcherPid" -ForegroundColor Green
-if ($env:ANTHROPIC_API_KEY) {
+if ($processingMode -ne 'MANUAL') {
     Write-Host "     Inbox Watcher    AUTO-EXECUTE Claude  PID $finalInboxPid" -ForegroundColor Green
 } else {
     Write-Host "     Inbox Watcher    modo MANUAL           PID $finalInboxPid" -ForegroundColor Yellow
 }
 Write-Host "     KDE Connect      bridge S10 FE        PID $finalKdePid" -ForegroundColor Green
 Write-Host ''
-Write-Host '   FLUXO AUTOMATICO (quando ANTHROPIC_API_KEY configurada):' -ForegroundColor Cyan
+if ($processingMode -eq 'API') {
+    Write-Host '   MOTOR: API Anthropic (ANTHROPIC_API_KEY)' -ForegroundColor Green
+} elseif ($processingMode -eq 'CLAUDE_CODE') {
+    Write-Host '   MOTOR: Claude Code CLI (plano Pro) -- sem API key necessaria' -ForegroundColor Green
+} else {
+    Write-Host '   MOTOR: MANUAL -- configure API key ou Claude Code CLI' -ForegroundColor Yellow
+}
+Write-Host ''
+Write-Host '   FLUXO AUTOMATICO:' -ForegroundColor Cyan
 Write-Host '     S10 envia audio -> Whisper transcreve -> Claude classifica' -ForegroundColor White
 Write-Host '     -> prioriza P1/P2/P3 -> executa no Windows -> salva resultado' -ForegroundColor White
 Write-Host ''
