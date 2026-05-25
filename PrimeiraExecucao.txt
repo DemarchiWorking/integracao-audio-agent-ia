@@ -1,0 +1,97 @@
+PASSO A PASSO — PRIMEIRA EXECUÇÃO
+PASSO 1 — Autenticar Claude Code CLI (só 1x na vida)
+Duplo clique em:
+
+CONECTAR-CLAUDE.bat
+Uma janela abre. O script vai:
+
+Confirmar que o CLI está instalado (v2.1.150 ✅)
+Testar autenticação → detectar que ainda não está logado
+Mostrar as instruções e perguntar se quer prosseguir
+Quando aparecer a pergunta: pressione Enter
+
+O Claude Code interativo abre na mesma janela. Você vai ver algo como:
+
+Welcome to Claude Code!
+>
+Digite exatamente:
+
+/login
+Pressione Enter.
+
+O navegador abre automaticamente → entre com a sua conta Claude Pro → autorize.
+
+Volte ao terminal → pressione Enter ou Ctrl+C → depois /exit para sair.
+
+O script verifica automaticamente e mostra:
+
+[OK] LOGIN REALIZADO COM SUCESSO!
+[OK] Motor ativo: Claude Code CLI (plano Pro)
+PASSO 2 — Iniciar o pipeline
+Duplo clique em:
+
+INICIAR-INTEGRACAO.bat
+Aguarde. Você deve ver no final:
+
+[OK] Motor: Claude Code CLI (plano Pro) -- sem API key necessaria
+[OK] API: pronta em http://localhost:8765
+[OK] KDE Watcher: ativo  monitorando Downloads
+[OK] Inbox Watcher: AUTO-EXECUTE Claude  PID xxxxx
+[OK] KDE Connect: bridge S10 FE
+Se aparecer SISTEMA PRONTO verde → tudo rodando. ✅
+
+PASSO 3 — Testar com áudio do S10
+No Samsung S10 FE:
+
+Abra o KDE Connect
+Toque no computador DESKTOP-N3BPMC5
+Toque em "Enviar arquivos"
+Selecione qualquer arquivo de áudio (gravado pelo microfone, WhatsApp, qualquer .opus, .m4a, .mp3)
+Confirme o envio
+PASSO 4 — Acompanhar o processamento
+Abra um PowerShell e execute:
+
+Get-Content 'C:\Users\Antonio Demarchi\Desktop\contexto-agente-claude\integracoes\s10fe-spen-audio\orchestrator\inbox.log' -Wait -Tail 20
+Você vai ver em tempo real:
+
+00:xx:xx [INBOX] Motor selecionado: Claude Code CLI Pro
+00:xx:xx [INBOX] Novo pacote detectado: 2026-05-25_HH-MM-SS
+00:xx:xx [INBOX] Disparando processador para: 2026-05-25_HH-MM-SS
+00:xx:xx [INBOX] Pacote processado com sucesso: 2026-05-25_HH-MM-SS
+PASSO 5 — Ver o resultado
+Na pasta do pacote gerado:
+
+inbox_tarefas\
+  └── 2026-05-25_HH-MM-SS\
+        transcricao.md          ← o que o Whisper entendeu do áudio
+        tarefas_priorizadas.md  ← Claude classificou e priorizou (P1/P2/P3)
+        execucao.md             ← log completo do que foi executado
+Abra tarefas_priorizadas.md — é a resposta do Claude Pro ao seu áudio.
+
+OPCIONAL — Processar os pacotes antigos que já estão esperando
+Tem 3 pacotes pendentes da sessão anterior. Para processá-los agora (após o login):
+
+cd "C:\Users\Antonio Demarchi\Desktop\contexto-agente-claude\integracoes\s10fe-spen-audio\orchestrator"
+python processar_com_claude_code.py
+Ele pega o mais recente sem execucao.md e processa automaticamente.
+
+PARAR tudo quando quiser
+Duplo clique em:
+
+PARAR-INTEGRACAO.bat
+Resumo dos arquivos (duplo clique)
+Arquivo	Para que serve
+CONECTAR-CLAUDE.bat	PRIMEIRO — autenticar o CLI com Claude Pro (1x)
+INICIAR-INTEGRACAO.bat	Iniciar o pipeline completo
+PARAR-INTEGRACAO.bat	Parar tudo com segurança
+Fluxo completo após autenticação:
+
+S10 envia áudio
+    → KDE Connect recebe no Downloads
+    → watcher.py detecta → Whisper transcreve (~7s)
+    → gera transcricao.md no inbox_tarefas/
+    → inbox_watcher.py detecta
+    → processar_com_claude_code.py dispara
+    → claude -p envia para Claude Pro
+    → Claude classifica P1/P2/P3 + executa PowerShell seguros
+    → salva tarefas_priorizadas.md + execucao.md

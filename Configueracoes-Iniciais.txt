@@ -1,0 +1,47 @@
+Testar o script na máquina agora:
+
+
+Usado uma ferramenta
+Perfeito — fluxo completo validado:
+
+✅ Encontrou o CLI: C:\...\npm\claude.ps1 v2.1.150
+✅ Detectou "não autenticado"
+✅ Mostrou o guia passo a passo
+✅ Parou no Read-Host (aguardando o usuário pressionar Enter — correto)
+Commitar:
+
+Commit feito
+e3dbf01
+Commit e3dbf01. Tudo pronto.
+
+Como funciona o CONECTAR-CLAUDE.bat
+Duplo clique → PowerShell abre e executa 3 etapas automaticamente:
+
+Etapa 1 — CLI
+
+Procura o claude no PATH, npm global e caminhos comuns do Windows
+Se não achar: instala sozinho via npm install -g @anthropic-ai/claude-code
+Etapa 2 — Teste silencioso
+
+Manda um claude -p "responda: AUTENTICADO" para checar sem interação
+Se já logado → mostra verde e fecha. Não pede nada, não abre nada
+Etapa 3 — Login guiado (só se necessário)
+
+Mostra as instruções em cores:
+Passo 1: Aguarde o Claude Code carregar
+Passo 2: Digite exatamente:   /login  → Enter
+Passo 3: O NAVEGADOR vai abrir → entre com Claude Pro
+Passo 4: Volte aqui
+Passo 5: Para sair:  /exit  ou  Ctrl+C
+Abre o claude interativo na mesma janela
+Após você sair do claude: verifica novamente automaticamente
+Se falhou: mostra as instruções manuais completas com o caminho exato do executável
+Ordem de uso hoje
+1. Duplo clique  →  CONECTAR-CLAUDE.bat
+                     └─ vai pedir /login → navegador → Claude Pro
+                     └─ confirma autenticação automaticamente
+2. Duplo clique  →  INICIAR-INTEGRACAO.bat
+                     └─ detecta claude CLI autenticado
+                     └─ inicia pipeline completo no modo "Claude Pro"
+3. Envie áudio pelo S10 via KDE Connect → tudo processa automaticamente
+5 commits para subir via GitHub Desktop: 381457f, bd6128a, a1ea98d, 8b7698e, e3dbf01.
