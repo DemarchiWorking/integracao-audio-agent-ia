@@ -14,6 +14,7 @@ Saidas na pasta do pacote:
   tarefas_priorizadas.md   breakdown P1/P2/P3 gerado pelo Claude
   execucao.md              log do que foi executado
 """
+import io
 import os
 import re
 import shutil
@@ -21,6 +22,12 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# Forcar UTF-8 no stdout/stderr (evita UnicodeEncodeError no Windows cp1252)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ---------------------------------------------------------------------------
 TIMEOUT_CLI = 180   # segundos para o claude CLI responder
@@ -135,18 +142,34 @@ def verify_claude_auth(claude_cmd: str) -> bool:
 
 def call_claude_cli(claude_cmd: str, prompt: str) -> str:
     """
-    Chama claude -p <prompt> e retorna stdout.
+    Envia o prompt para claude --print via stdin pipe.
+    Evita limites de comprimento de argumento no Windows e problemas
+    com caracteres especiais/newlines em argumentos de linha de comando.
     Lanca RuntimeError em caso de falha.
     """
+    import tempfile
+
+    # Escreve o prompt em arquivo temporario (UTF-8 limpo, sem BOM)
+    tmp_dir = os.path.join(tempfile.gettempdir(), "datadev-orch-runner")
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_file = os.path.join(tmp_dir, "prompt_input.txt")
+
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        f.write(prompt)
+
     try:
-        result = subprocess.run(
-            [claude_cmd, "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_CLI,
-            encoding="utf-8",
-            errors="replace",
-        )
+        # Pipe stdin: cat tmp_file | claude --print
+        # O claude --print le de stdin quando nao ha argumento de prompt
+        with open(tmp_file, "r", encoding="utf-8") as stdin_f:
+            result = subprocess.run(
+                [claude_cmd, "--print"],
+                stdin=stdin_f,
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_CLI,
+                encoding="utf-8",
+                errors="replace",
+            )
         if result.returncode != 0:
             err = (result.stderr or "").strip()[:400] or "(sem stderr)"
             raise RuntimeError(f"claude CLI retornou exit={result.returncode}: {err}")
@@ -155,6 +178,11 @@ def call_claude_cli(claude_cmd: str, prompt: str) -> str:
         raise RuntimeError(f"Timeout {TIMEOUT_CLI}s — Claude nao respondeu a tempo")
     except OSError as e:
         raise RuntimeError(f"Erro ao executar claude CLI: {e}")
+    finally:
+        try:
+            os.unlink(tmp_file)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +256,8 @@ def processar(packet_dir: Path) -> None:
         print("Execute 'claude' no terminal e complete o login antes de continuar.")
         sys.exit(1)
 
-    transcricao = transcricao_file.read_text(encoding="utf-8")
+    # utf-8-sig remove BOM automaticamente (PowerShell escreve UTF-8 com BOM)
+    transcricao = transcricao_file.read_text(encoding="utf-8-sig")
 
     print(f"\n{'='*60}")
     print(f"  DataDev Lab — Claude Code Engine v2.0 (Pro path)")
@@ -245,17 +274,44 @@ def processar(packet_dir: Path) -> None:
     print()
     print(f"  >> Enviando para Claude Code CLI (timeout {TIMEOUT_CLI}s)...")
 
-    # Prompt unificado (system + user em sequencia, sem separador de API)
-    full_prompt = (
-        SYSTEM_PROMPT
-        + "\n---\n\n"
-        + "TRANSCRICAO DE AUDIO RECEBIDA (Samsung S10 FE via KDE Connect):\n\n"
-        + transcricao
-        + "\n\n---\n\n"
-        + "Classifica, prioriza e documenta. "
-        + "Para tarefas AUTOMACAO inclua blocos ```powershell prontos para executar.\n"
-        + f"Salva o resultado em: {packet_dir}/tarefas_priorizadas.md"
-    )
+    # Prompt task-first: instrucao e transcricao antes do contexto
+    # Evita que o CLI trate o bloco inicial como "greeting" e pergunte o que fazer
+    full_prompt = f"""Analise esta transcricao de audio e gere o breakdown de tarefas agora.
+
+TRANSCRICAO RECEBIDA (Samsung S10 FE -> Whisper PT-BR, pode ter erros foneticos):
+===================================================================================
+{transcricao}
+===================================================================================
+
+RESPONDA NESTE FORMATO EXATO (markdown):
+
+## Tipo
+[AUTOMACAO | CODIGO | ESTRATEGIA | ANOTACAO] — justificativa em 1 linha
+
+## Tarefas Priorizadas
+
+### [P1] Titulo da tarefa critica
+- **O que:** acao concreta
+- **Como:** abordagem tecnica
+- **Aceite:** como saber que esta pronto
+- **Tempo:** rapido/medio/longo
+
+### [P2] ...
+
+### [P3] ...
+
+## Comandos (para tipo AUTOMACAO)
+Inclua blocos ```powershell com comandos reais prontos para executar no Windows 10.
+Paths reais do Windows (Desktop = C:\\Users\\Antonio Demarchi\\Desktop\\, etc).
+
+---
+
+CONTEXTO DO USUARIO (use para interpretar erros foneticos e dominio):
+- Nome: Antonio Demarchi, Backend Dev II, nstech (fintech critica, pagamento fretes PEF/ANTT)
+- Stack: Go (hexagonal), Java, React/Next.js, Python, Docker, Kubernetes, Terraform, AWS
+- Projetos ativos: NeuroLead (Go+AWS), Challenge2 (FIAP EKS), DataDev Lab, AGV, Sebrae
+- Exemplos de erros do Whisper: "Neurolid"=NeuroLead, "Chav SSH"=Chave SSH, "Midleuari"=Middleware
+- Responda em portugues tecnico. Nao faca perguntas. Nao peça confirmacao. Apenas analise e responda."""
 
     # Chamar Claude CLI
     try:

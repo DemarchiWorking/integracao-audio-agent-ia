@@ -3,68 +3,91 @@ title DataDev Lab - Iniciando Integracao...
 chcp 65001 > nul
 
 :: ================================================================
-::  INICIAR-INTEGRACAO.bat  v2.0
+::  INICIAR-INTEGRACAO.bat  v2.1
 ::  DataDev Demarchi Lab - S10 FE + Windows 10
-::  Le ANTHROPIC_API_KEY do .env automaticamente antes de iniciar.
+::  Motor auto-detectado: API key OU Claude Code CLI (plano Pro)
 ::  Duplo clique para iniciar tudo.
 :: ================================================================
 
 echo.
 echo   ============================================================
-echo    DataDev Demarchi Lab -- Carregando configuracao
+echo    DataDev Demarchi Lab -- Detectando motor de processamento
 echo   ============================================================
 echo.
 
-:: ---- Tentar carregar do .env ------------------------------------
-set "ENV_FILE=%~dp0.env"
+:: ---- Garantir npm no PATH (para claude CLI) ---------------------
+set "NPM_BIN=%APPDATA%\npm"
+if exist "%NPM_BIN%" (
+    echo %PATH% | find /i "%NPM_BIN%" > nul
+    if errorlevel 1 set "PATH=%NPM_BIN%;%PATH%"
+)
 
+:: ---- Tentar carregar API key do .env ----------------------------
+set "ENV_FILE=%~dp0.env"
 if exist "%ENV_FILE%" (
-    :: Ler linhas no formato KEY=VALUE, ignorar # e linhas vazias
     for /f "usebackq eol=# tokens=1,* delims==" %%K in ("%ENV_FILE%") do (
         if /i "%%K"=="ANTHROPIC_API_KEY" set "ANTHROPIC_API_KEY=%%L"
     )
 )
 
-:: ---- Checar se a key foi carregada e e valida -------------------
-if not defined ANTHROPIC_API_KEY goto :sem_key
-if "%ANTHROPIC_API_KEY%"=="sk-ant-COLE-SUA-CHAVE-AQUI" goto :placeholder
+:: ---- Decidir motor: API key valida? -----------------------------
+set "MOTOR=nenhum"
 
-:: Key valida encontrada
-set "_M=%ANTHROPIC_API_KEY:~0,18%..."
-echo   [OK] ANTHROPIC_API_KEY: %_M%
-echo   [OK] Modo: AUTO-EXECUTE Claude ativado
-echo.
-goto :iniciar
-
-:sem_key
-if not exist "%ENV_FILE%" (
-    echo   [!!] Arquivo .env nao encontrado
-    echo        Crie: %ENV_FILE%
-    echo        Conteudo: ANTHROPIC_API_KEY=sk-ant-SUA-CHAVE
-) else (
-    echo   [!!] ANTHROPIC_API_KEY nao encontrada no .env
+if defined ANTHROPIC_API_KEY (
+    if not "%ANTHROPIC_API_KEY%"=="sk-ant-COLE-SUA-CHAVE-AQUI" (
+        if not "%ANTHROPIC_API_KEY%"=="" (
+            set "_M=%ANTHROPIC_API_KEY:~0,18%..."
+            echo   [OK] Motor: API Anthropic  ^(%_M%^)
+            set "MOTOR=api"
+        )
+    )
 )
-echo.
-echo   Claude processara audio mas NAO executara tarefas automaticamente.
-echo   Consulte: https://console.anthropic.com/ para obter sua chave
-echo.
-goto :iniciar
 
-:placeholder
-echo   [!!] .env encontrado mas chave NAO foi configurada ainda.
-echo.
-echo   Edite o arquivo .env e cole sua chave real:
-echo   %ENV_FILE%
-echo.
-echo   Pressione qualquer tecla para abrir o .env no Notepad...
-pause > nul
-notepad "%ENV_FILE%"
-echo.
-echo   Salve o arquivo e execute novamente.
-pause
-exit /b 1
+:: ---- Se nao tem API key: tentar Claude Code CLI -----------------
+if "%MOTOR%"=="nenhum" (
+    claude --version > nul 2>&1
+    if not errorlevel 1 (
+        :: CLI presente - verificar se esta autenticado
+        for /f "delims=" %%R in ('claude -p "responda so: OK" 2^>^&1') do set "_CLI_TEST=%%R"
+        echo %_CLI_TEST% | find /i "Not logged in" > nul
+        if errorlevel 1 (
+            echo %_CLI_TEST% | find /i "OK" > nul
+            if not errorlevel 1 (
+                echo   [OK] Motor: Claude Code CLI ^(plano Pro^) - autenticado
+                set "MOTOR=claude_code"
+            ) else (
+                echo   [OK] Motor: Claude Code CLI ^(plano Pro^) - detectado
+                set "MOTOR=claude_code"
+            )
+        ) else (
+            echo   [!!] Claude Code CLI encontrado mas NAO autenticado
+            echo        Execute CONECTAR-CLAUDE.bat primeiro
+        )
+    )
+)
 
+:: ---- Nenhum motor disponivel ------------------------------------
+if "%MOTOR%"=="nenhum" (
+    echo.
+    echo   [XX] Nenhum motor de processamento disponivel.
+    echo.
+    echo   Opcao A - Claude Pro ^(sem custo extra^):
+    echo     1. Execute CONECTAR-CLAUDE.bat
+    echo     2. Digite /login no Claude Code que abrir
+    echo     3. Execute este arquivo novamente
+    echo.
+    echo   Opcao B - API Anthropic:
+    echo     1. Acesse https://console.anthropic.com/
+    echo     2. Edite o arquivo .env com sua chave
+    echo     3. Execute este arquivo novamente
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
+
+:: ---- Iniciar pipeline -------------------------------------------
 :iniciar
-:: ANTHROPIC_API_KEY e herdada automaticamente pelo PowerShell
 powershell -ExecutionPolicy Bypass -File "%~dp0start-integracao.ps1"
 pause

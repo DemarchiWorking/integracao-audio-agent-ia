@@ -202,7 +202,7 @@ def processar(packet_dir: Path) -> None:
         print(f"ERRO: transcricao.md nao encontrada em {packet_dir}")
         sys.exit(1)
 
-    transcricao = transcricao_file.read_text(encoding="utf-8")
+    transcricao = transcricao_file.read_text(encoding="utf-8-sig")
 
     print(f"\n{'='*60}")
     print(f"  DataDev Lab — Claude Engine v2.0")
