@@ -1,0 +1,12 @@
+# Orquestrador de Áudio — DataDev Demarchi Lab
+# Passo 1 (base)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+requests>=2.31.0
+
+# Passo 2 (transcrição — descomentar após: winget install Gyan.FFmpeg)
+# openai-whisper>=20231117
+
+# Passo 3 (watcher V2)
+# watchdog>=3.0.0

@@ -1,0 +1,14 @@
+﻿# Logs
+orchestrator/*.log
+orchestrator/__pycache__/
+orchestrator/.pid_*
+
+# Pacotes gerados (dados pessoais)
+inbox_tarefas/
+
+# Audio de teste
+orchestrator/test_audio_s10fe.wav
+
+# Python
+*.pyc
+*.pyo

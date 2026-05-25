@@ -1,0 +1,256 @@
+==============================================================
+  GUIA COMPLETO — S10 FE + WINDOWS 10 + CLAUDE CODE
+  Versao: 1.0  |  Data: 2026-05-24
+  Objetivo: Falar no celular → Claude executa no Windows
+==============================================================
+
+RESUMO DO FLUXO COMPLETO
+-------------------------
+[S10 FE] Gravar audio
+    |
+    | (KDE Connect via WiFi)
+    v
+[Windows] Documents\KDE Connect\ <-- arquivo .m4a cai aqui
+    |
+    | (watcher.py detecta automaticamente)
+    v
+[Whisper] Transcricao local (CPU, ~5 segundos)
+    |
+    v
+[PacketGenerator] inbox_tarefas\2026-05-24_HH-MM-SS\
+    |  transcricao.md   (texto exato do audio)
+    |  roteiro.md       (passos extraidos)
+    |  descricao_tarefa.md
+    |  futuro_processamento_1.md  (V2)
+    |  futuro_processamento_2.md  (V2)
+    |  processar_agora.ps1        (dispara Claude)
+    v
+[Claude Code] Le o contexto e executa a tarefa
+
+
+==============================================================
+PARTE 1 — O QUE JA ESTA INSTALADO E PRONTO
+==============================================================
+
+  [OK] FFmpeg v8.1.1       (conversao de audio)
+  [OK] Whisper base model  (transcricao offline, 100% local)
+  [OK] KDE Connect Windows (ponte Android <-> Windows)
+       Pasta monitorada: Documents\KDE Connect\
+  [OK] Orquestrador API    (http://localhost:8765)
+  [OK] Watcher             (detecta arquivos automaticamente)
+
+  ARQUIVOS DO SISTEMA:
+  orchestrator\main.py       -- servidor FastAPI
+  orchestrator\watcher.py    -- detecta arquivos KDE Connect
+  orchestrator\start.ps1     -- inicia tudo
+  orchestrator\stop.ps1      -- para tudo
+  inbox_tarefas\             -- pacotes gerados ficam aqui
+
+
+==============================================================
+PARTE 2 — CONFIGURAR UMA VEZ (pre-requisitos)
+==============================================================
+
+PASSO A — Configurar chave da API Anthropic
+--------------------------------------------
+1. Acesse: https://console.anthropic.com/
+2. Va em "API Keys" -> "Create Key"
+3. Copie a chave (comeca com "sk-ant-...")
+4. No Windows, abra PowerShell e execute:
+   [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY","sk-ant-SUA-CHAVE-AQUI","User")
+5. Feche e reabra o PowerShell para aplicar
+
+PASSO B — Instalar SDK Anthropic para Python
+---------------------------------------------
+   pip install anthropic
+
+PASSO C — Instalar KDE Connect no S10 FE
+-----------------------------------------
+1. No S10 FE, abra a Play Store
+2. Busque: "KDE Connect"
+3. Instale o app (desenvolvedor: KDE)
+4. Abra o app e conceda todas as permissoes
+
+PASSO D — Parear S10 FE com o Windows
+----------------------------------------
+1. Coloque o S10 FE e o PC na MESMA rede WiFi
+   (o PC esta em: 192.168.3.65)
+2. No Windows: Menu Iniciar -> buscar "KDE Connect" -> abrir
+3. No S10 FE: app KDE Connect -> vai mostrar "DESKTOP-N3BPMC5"
+4. Toque no nome do PC -> "Solicitar pareamento"
+5. No Windows: aceite a solicitacao de pareamento
+6. Teste: no S10 FE, toque nos 3 pontinhos -> "Enviar arquivo"
+   -> envie qualquer foto -> ela deve aparecer em Documents\KDE Connect\
+
+PASSO E — Configurar pasta de recebimento do KDE Connect
+----------------------------------------------------------
+No Windows, abra KDE Connect -> clique no S10 FE -> Configuracoes
+-> "Compartilhamento de Arquivos" -> "Pasta de Download"
+-> Troque para: C:\Users\Antonio Demarchi\Documents\KDE Connect\
+(provavelmente ja esta correto)
+
+
+==============================================================
+PARTE 3 — USO DIARIO (depois de configurado)
+==============================================================
+
+INICIAR O SISTEMA (fazer uma vez por sessao)
+---------------------------------------------
+1. Abra o PowerShell na pasta do orquestrador:
+   cd "C:\Users\Antonio Demarchi\Desktop\contexto-agente-claude\integracoes\s10fe-spen-audio\orchestrator"
+2. Execute:
+   .\start.ps1
+3. Aguarde as mensagens:
+   [API]     Iniciado  (PID XXXXX)  porta 8765
+   [Watcher] Iniciado  (PID XXXXX)  monitorando KDE Connect
+4. O sistema esta pronto. Pode minimizar o PowerShell.
+
+
+==============================================================
+PARTE 4 — TESTE DO FLUXO COMPLETO (CRIAR PASTA)
+==============================================================
+
+OBJETIVO: Falar "crie uma pasta chamada s10fe-teste na area de trabalho"
+no S10 FE e o Claude criar a pasta no Windows automaticamente.
+
+PASSO 1 — Iniciar o orquestrador (se ainda nao iniciou)
+---------------------------------------------------------
+  cd "C:\Users\Antonio Demarchi\Desktop\contexto-agente-claude\integracoes\s10fe-spen-audio\orchestrator"
+  .\start.ps1
+
+PASSO 2 — Gravar o audio no S10 FE
+------------------------------------
+1. Abra o app "Gravador de voz" (Samsung Voice Recorder)
+2. Grave claramente em portugues:
+   "Crie uma pasta chamada s10fe-teste na area de trabalho"
+3. Pare a gravacao e salve
+
+PASSO 3 — Enviar o audio via KDE Connect
+-----------------------------------------
+1. Abra o app KDE Connect no S10 FE
+2. Toque no PC "DESKTOP-N3BPMC5"
+3. Toque em "Enviar arquivos"
+4. Selecione a gravacao que acabou de fazer
+
+PASSO 4 — Aguardar o processamento automatico
+----------------------------------------------
+Nos proximos 5-15 segundos, o sistema vai:
+- Detectar o arquivo chegando em Documents\KDE Connect\
+- Transcrever com Whisper (sem internet, 100% local)
+- Gerar o pacote em inbox_tarefas\
+
+Voce pode verificar o log em tempo real:
+  Get-Content "orchestrator\watcher_err.log" -Wait -Tail 5
+  Get-Content "orchestrator\api_err.log"    -Wait -Tail 5
+
+PASSO 5 — Localizar o pacote gerado
+-------------------------------------
+  cd "C:\Users\Antonio Demarchi\Desktop\contexto-agente-claude\integracoes\s10fe-spen-audio"
+  Get-ChildItem inbox_tarefas\ | Sort-Object LastWriteTime -Descending
+
+PASSO 6 — Executar o Claude Code com o contexto
+-------------------------------------------------
+Opcao A — Via PowerShell com API Anthropic (automatico):
+  cd inbox_tarefas\<NOME-DA-PASTA-GERADA>
+  python ..\orchestrator\processar_com_claude.py .
+
+Opcao B — Via Claude Code Desktop (manual, sem API key extra):
+  1. Abra o Claude Code no Windows
+  2. No terminal do Claude Code, execute:
+     cat inbox_tarefas\<PASTA>\transcricao.md
+     cat inbox_tarefas\<PASTA>\roteiro.md
+  3. Ou simplesmente diga ao Claude Code:
+     "Processe este pacote: inbox_tarefas\<PASTA>"
+
+RESULTADO ESPERADO:
+  Claude vai ler a transcricao, entender o comando e executar:
+  New-Item -ItemType Directory "C:\Users\Antonio Demarchi\Desktop\s10fe-teste"
+  -> Pasta criada na area de trabalho!
+
+
+==============================================================
+PARTE 5 — COMANDOS UTEIS
+==============================================================
+
+VERIFICAR SE ORQUESTRADOR ESTA RODANDO:
+  Invoke-WebRequest http://localhost:8765/health -UseBasicParsing
+
+VER STATUS E ESTATISTICAS:
+  Invoke-WebRequest http://localhost:8765/status -UseBasicParsing
+
+VER LOGS EM TEMPO REAL:
+  Get-Content orchestrator\api_err.log -Wait -Tail 20
+  Get-Content orchestrator\watcher_err.log -Wait -Tail 20
+
+VER ULTIMO PACOTE GERADO:
+  $p = (Get-ChildItem inbox_tarefas | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+  Get-ChildItem $p
+  Get-Content "$p\transcricao.md"
+
+PARAR O SISTEMA:
+  .\orchestrator\stop.ps1
+
+REINICIAR:
+  .\orchestrator\restart.ps1
+
+SIMULAR S10 FE (teste sem celular, copia arquivo de audio para a pasta):
+  Copy-Item "caminho\para\audio.wav" "$env:USERPROFILE\Documents\KDE Connect\"
+
+
+==============================================================
+PARTE 6 — TROUBLESHOOTING
+==============================================================
+
+PROBLEMA: KDE Connect nao encontra o S10 FE
+SOLUCAO:  Verificar se ambos estao na mesma rede WiFi (192.168.3.x)
+          No Windows: Firewall -> permitir KDE Connect
+          winget install KDE.KDEConnect (se precisar reinstalar)
+
+PROBLEMA: Audio chega mas nao e processado
+SOLUCAO:  Verificar extensao (.m4a, .wav, .mp3 sao suportados)
+          Verificar log: Get-Content orchestrator\api_err.log
+
+PROBLEMA: Transcricao muito imprecisa
+SOLUCAO:  Falar mais devagar e perto do microfone
+          Modelo base e bom para PT-BR real. TTS de teste e menos preciso.
+          Para mais precisao, mudar para modelo "small":
+          $env:WHISPER_MODEL = "small" (antes de iniciar)
+
+PROBLEMA: "Orquestrador offline" no watcher
+SOLUCAO:  O watcher sobe antes da API. Aguardar 5s ou rodar start.ps1 de novo.
+
+PROBLEMA: processar_agora.ps1 nao encontra 'claude'
+SOLUCAO:  Usar processar_com_claude.py (via API Anthropic)
+          Configurar ANTHROPIC_API_KEY (ver Parte 2, Passo A)
+
+
+==============================================================
+PARTE 7 — ARQUITETURA RESUMIDA
+==============================================================
+
+  DISPOSITIVO       TECNOLOGIA              FUNCAO
+  --------          ----------              ------
+  Samsung S10 FE    KDE Connect Android     Envia audio via WiFi
+  Windows 10        KDE Connect Windows     Recebe na pasta monitorada
+  watcher.py        Python watchdog         Detecta arquivo novo
+  main.py           FastAPI (async)         Endpoint /audio POST
+  transcriber.py    OpenAI Whisper local    Audio -> Texto (offline)
+  packet_generator  Python                  Cria estrutura de arquivos
+  processar_com_    Python + Anthropic SDK  Envia contexto ao Claude
+    claude.py
+  Claude API        claude-sonnet-4-6       Entende e executa a tarefa
+
+
+==============================================================
+PROXIMOS PASSOS (ROADMAP V2)
+==============================================================
+
+V2.1: Whisper "small" para melhor precisao em PT-BR
+V2.2: Watcher em inbox_tarefas/ (execucao automatica do Claude)
+V2.3: Claude com tool use (executa comandos PowerShell diretamente)
+V2.4: KDE Connect notificacao de retorno ao S10 FE
+V3.0: Daemonizacao NSSM (servico Windows real, 24/7 sem janela aberta)
+
+==============================================================
+FIM DO GUIA
+==============================================================
