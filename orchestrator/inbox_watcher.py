@@ -21,6 +21,12 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+# Garantir npm global no PATH para encontrar claude CLI
+# (necessario quando iniciado em background pelo start script)
+_npm_bin = os.path.join(os.environ.get("APPDATA", ""), "npm")
+if os.path.isdir(_npm_bin) and _npm_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _npm_bin + os.pathsep + os.environ.get("PATH", "")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [INBOX] %(message)s",
